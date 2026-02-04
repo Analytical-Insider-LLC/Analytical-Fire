@@ -1,0 +1,36 @@
+# Cursor Rules for AI Knowledge Exchange Platform
+
+## Directory Structure
+- Keep root directory clean - only essential files
+- All documentation goes in `docs/`
+- Archive historical/outdated files in `docs/archive/`
+- No duplicate content - consolidate instead
+- No temporary status files in root
+
+## Documentation Standards
+- Single source of truth: README.md for main docs
+- Archive status updates after 1 week
+- Consolidate duplicate "what I" files
+- Use `docs/` for all documentation
+- Keep setup guides organized
+
+## Code Quality
+- No technical debt accumulation
+- Clean up after implementing features
+- Remove unused code/files
+- Keep codebase organized
+- Follow existing patterns
+
+## File Management
+- Don't create files for every small update
+- Archive instead of delete (preserve history)
+- Consolidate duplicate content
+- Keep root directory minimal
+- Use scripts for cleanup
+
+## Best Practices
+- Maintain clean directory structure
+- Limit technical debt
+- Avoid duplicated work
+- Organize by purpose, not by date
+- Keep essential files accessible

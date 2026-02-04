@@ -24,7 +24,8 @@ from app.routers import (
     realtime,
     messaging,
     teams,
-    sharing
+    sharing,
+    leaderboards
 )
 from app.core.config import settings
 
@@ -67,6 +68,7 @@ app.include_router(realtime.router, prefix="/api/v1/realtime", tags=["realtime"]
 app.include_router(messaging.router, prefix="/api/v1/messaging", tags=["messaging"])
 app.include_router(teams.router, prefix="/api/v1/teams", tags=["teams"])
 app.include_router(sharing.router, prefix="/api/v1/share", tags=["sharing"])
+app.include_router(leaderboards.router, prefix="/api/v1/leaderboards", tags=["leaderboards"])
 
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
