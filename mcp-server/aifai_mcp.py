@@ -249,9 +249,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             task_desc = arguments.get("task_description", "")
             limit = arguments.get("limit", 5)
             
-            # Extract search terms from task description
-            from app.services.workflow_integration import extract_search_terms
-            search_terms = extract_search_terms(task_desc)
+            # Extract search terms from task description (simple extraction)
+            words = task_desc.lower().split()
+            stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
+            search_terms = [w for w in words if len(w) >= 2 and w not in stop_words][:5]
             query = " ".join(search_terms) if search_terms else task_desc
             
             results = client.search_knowledge(
