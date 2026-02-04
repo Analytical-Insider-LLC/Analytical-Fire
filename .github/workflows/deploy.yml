@@ -1,10 +1,12 @@
 name: Deploy to AWS
 
+# Optional deployment - only runs if credentials are available
+# Can be triggered manually via workflow_dispatch
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger only
+  # push:  # Disabled - uncomment if you want auto-deploy on push
+  #   branches:
+  #     - main
 
 env:
   AWS_REGION: us-east-1
@@ -17,6 +19,9 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    
+    # Skip if credentials not available
+    if: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
     
     steps:
     - name: Checkout
