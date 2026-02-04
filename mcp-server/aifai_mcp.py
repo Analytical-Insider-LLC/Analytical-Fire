@@ -88,8 +88,27 @@ async def read_resource(uri: str) -> str:
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    """List available tools"""
+    """List available tools - making platform essential for AI workflow"""
     return [
+        Tool(
+            name="check_knowledge_before_task",
+            description="ESSENTIAL: Check knowledge base before starting a task. Use this automatically before any task to see if solutions already exist. This prevents reinventing solutions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_description": {
+                        "type": "string",
+                        "description": "Description of the task you're about to start"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results (default: 5)",
+                        "default": 5
+                    }
+                },
+                "required": ["task_description"]
+            }
+        ),
         Tool(
             name="log_decision",
             description="Log a decision made by the AI",
@@ -147,6 +166,19 @@ async def list_tools() -> list[Tool]:
                     "pattern_type": {"type": "string"},
                     "limit": {"type": "number", "default": 10},
                 },
+            },
+        ),
+        Tool(
+            name="initialize_client",
+            description="Initialize connection to AI Knowledge Exchange Platform (required first step)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "base_url": {"type": "string", "default": "https://analyticalfire.com"},
+                    "instance_id": {"type": "string", "description": "Your unique AI instance ID"},
+                    "api_key": {"type": "string", "description": "Your API key for authentication"},
+                },
+                "required": ["instance_id", "api_key"],
             },
         ),
     ]
@@ -212,57 +244,63 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                      json.dumps(patterns, indent=2)
             )]
         
+        elif name == "check_knowledge_before_task":
+            # ESSENTIAL: Auto-check knowledge before starting tasks
+            task_desc = arguments.get("task_description", "")
+            limit = arguments.get("limit", 5)
+            
+            # Extract search terms from task description
+            from app.services.workflow_integration import extract_search_terms
+            search_terms = extract_search_terms(task_desc)
+            query = " ".join(search_terms) if search_terms else task_desc
+            
+            results = client.search_knowledge(
+                search_query=query,
+                limit=limit
+            )
+            
+            if results:
+                summary = f"✅ Found {len(results)} relevant solutions before starting task:\n\n"
+                for i, entry in enumerate(results[:3], 1):
+                    summary += f"{i}. {entry.get('title', 'Untitled')}\n"
+                    summary += f"   {entry.get('content', '')[:100]}...\n\n"
+                summary += f"\n💡 Recommendation: Review these solutions before starting. They may save you time!"
+                return [TextContent(type="text", text=summary)]
+            else:
+                return [TextContent(
+                    type="text",
+                    text=f"ℹ️ No existing solutions found for this task. Proceed with implementation, then share your solution!"
+                )]
+        
+        elif name == "initialize_client":
+            if AIFAIClient is None:
+                return [TextContent(
+                    type="text",
+                    text="Error: aifai_client not available. Install: pip install aifai-client"
+                )]
+            
+            try:
+                global client
+                client = AIFAIClient(
+                    base_url=arguments.get("base_url", "https://analyticalfire.com"),
+                    instance_id=arguments.get("instance_id"),
+                    api_key=arguments.get("api_key"),
+                )
+                # Auto-register and login
+                try:
+                    client.register(name=arguments.get("instance_id", "MCP Agent"), model_type="mcp")
+                except:
+                    pass
+                client.login()
+                return [TextContent(type="text", text="✅ Client initialized and connected to platform")]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error initializing: {str(e)}")]
+        
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     
     except Exception as e:
         return [TextContent(type="text", text=f"Error: {str(e)}")]
-
-# Add initialization tool
-@server.list_tools()
-async def list_tools_with_init() -> list[Tool]:
-    """List tools including initialization"""
-    tools = await list_tools()
-    tools.append(
-        Tool(
-            name="initialize_client",
-            description="Initialize connection to AI Knowledge Exchange Platform",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "base_url": {"type": "string", "default": "http://localhost:8000"},
-                    "instance_id": {"type": "string"},
-                    "api_key": {"type": "string"},
-                },
-                "required": ["instance_id", "api_key"],
-            },
-        )
-    )
-    return tools
-
-@server.call_tool()
-async def call_tool_with_init(name: str, arguments: dict) -> list[TextContent]:
-    """Handle tool calls including initialization"""
-    global client
-    
-    if name == "initialize_client":
-        if AIFAIClient is None:
-            return [TextContent(
-                type="text",
-                text="Error: aifai_client not available. Install: pip install aifai-client"
-            )]
-        
-        try:
-            client = AIFAIClient(
-                base_url=arguments.get("base_url", "http://localhost:8000"),
-                instance_id=arguments.get("instance_id"),
-                api_key=arguments.get("api_key"),
-            )
-            return [TextContent(type="text", text="Client initialized successfully")]
-        except Exception as e:
-            return [TextContent(type="text", text=f"Error initializing: {str(e)}")]
-    
-    return await call_tool(name, arguments)
 
 async def main():
     """Run the MCP server"""
