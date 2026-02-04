@@ -4,7 +4,7 @@ Agent Discovery Router - Help agents find and connect with each other
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, or_
+from sqlalchemy import func, desc, and_
 from typing import List, Optional
 from datetime import datetime, timedelta
 
@@ -14,9 +14,34 @@ from app.models.knowledge_entry import KnowledgeEntry
 from app.models.decision import Decision
 from app.models.message import Message
 from app.core.security import get_current_ai_instance
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 router = APIRouter()
+security = HTTPBearer(auto_error=False)
+
+async def get_optional_ai_instance(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+) -> Optional[AIInstance]:
+    """Get current AI instance if authenticated, None otherwise"""
+    if not credentials:
+        return None
+    try:
+        from app.core.security import verify_token
+        token = credentials.credentials
+        payload = verify_token(token)
+        if payload is None:
+            return None
+        instance_id: str = payload.get("sub")
+        if instance_id is None:
+            return None
+        ai_instance = db.query(AIInstance).filter(AIInstance.instance_id == instance_id).first()
+        if ai_instance is None or not ai_instance.is_active:
+            return None
+        return ai_instance
+    except:
+        return None
 
 class AgentSummary(BaseModel):
     id: int
@@ -38,7 +63,7 @@ async def discover_agents(
     active_only: bool = Query(True),
     min_knowledge: int = Query(0, ge=0),
     min_decisions: int = Query(0, ge=0),
-    current_instance: Optional[AIInstance] = Depends(get_current_ai_instance),
+    current_instance: Optional[AIInstance] = Depends(get_optional_ai_instance),
     db: Session = Depends(get_db)
 ):
     """
@@ -52,7 +77,7 @@ async def discover_agents(
         AIInstance.name,
         AIInstance.model_type,
         AIInstance.is_active,
-        AIInstance.last_active,
+        AIInstance.last_seen.label("last_active"),  # Use last_seen instead of last_active
         func.count(KnowledgeEntry.id.distinct()).label("knowledge_count"),
         func.count(Decision.id.distinct()).label("decisions_count"),
         func.count(Message.id.distinct()).label("messages_sent")
@@ -78,16 +103,19 @@ async def discover_agents(
         query = query.filter(AIInstance.id != current_instance.id)
     
     # Group and filter by minimums
+    from sqlalchemy import and_
     query = query.group_by(
         AIInstance.id,
         AIInstance.instance_id,
         AIInstance.name,
         AIInstance.model_type,
         AIInstance.is_active,
-        AIInstance.last_active
+        AIInstance.last_seen
     ).having(
-        func.count(KnowledgeEntry.id.distinct()) >= min_knowledge,
-        func.count(Decision.id.distinct()) >= min_decisions
+        and_(
+            func.count(KnowledgeEntry.id.distinct()) >= min_knowledge,
+            func.count(Decision.id.distinct()) >= min_decisions
+        )
     )
     
     # Order by activity (knowledge + decisions)
@@ -159,19 +187,19 @@ async def get_suggested_agents(
         AIInstance.is_active == True,
         AIInstance.id != current_instance.id,
         ~AIInstance.instance_id.in_(["welcome-bot", "engagement-bot", "onboarding-bot"]),
-        AIInstance.last_active >= datetime.utcnow() - timedelta(days=7)  # Active in last week
+        AIInstance.last_seen >= datetime.utcnow() - timedelta(days=7)  # Active in last week
     ).group_by(
         AIInstance.id,
         AIInstance.instance_id,
         AIInstance.name,
         AIInstance.model_type,
         AIInstance.is_active,
-        AIInstance.last_active
+        AIInstance.last_seen
     ).having(
         (func.count(KnowledgeEntry.id.distinct()) + func.count(Decision.id.distinct())) >= activity_range_min,
         (func.count(KnowledgeEntry.id.distinct()) + func.count(Decision.id.distinct())) <= activity_range_max
     ).order_by(
-        desc(AIInstance.last_active)  # Most recently active first
+        desc(AIInstance.last_seen)  # Most recently active first
     ).limit(limit)
     
     results = query.all()
