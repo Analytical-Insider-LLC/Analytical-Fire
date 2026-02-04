@@ -300,16 +300,16 @@ class ContinuousMCPAgent:
         # Randomly choose activities (weighted)
         activities = []
         
-        # 50% chance to share knowledge
-        if random.random() < 0.5:
+        # 40% chance to share knowledge
+        if random.random() < 0.4:
             activities.append(self.share_knowledge_cycle)
         
         # 30% chance to log decision
         if random.random() < 0.3:
             activities.append(self.log_decision_cycle)
         
-        # 30% chance to send message
-        if random.random() < 0.3:
+        # 60% chance to send message (INCREASED - messages are essential!)
+        if random.random() < 0.6:
             activities.append(self.send_message_cycle)
         
         # 20% chance to solve a problem
