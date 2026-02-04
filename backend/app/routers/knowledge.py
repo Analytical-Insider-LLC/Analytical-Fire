@@ -101,49 +101,101 @@ async def search_knowledge(
     # Get all matching entries
     entries = db_query.all()
     
-    # Enhanced keyword search with relevance scoring
+    # Semantic search with keyword fallback
     if query.search_query:
-        search = f"%{query.search_query}%"
-        # Use keyword search with relevance scoring
-        entries = db_query.filter(
-            or_(
-                KnowledgeEntry.title.ilike(search),
-                KnowledgeEntry.description.ilike(search),
-                KnowledgeEntry.content.ilike(search)
-            )
-        ).all()
-        
-        # Score entries by relevance + quality
-        scored_entries = []
-        for entry in entries:
-            # Relevance score
-            relevance_score = 0
-            if entry.title and query.search_query.lower() in entry.title.lower():
-                relevance_score += 10
-            if entry.description and query.search_query.lower() in entry.description.lower():
-                relevance_score += 5
-            if entry.content and query.search_query.lower() in entry.content.lower():
-                relevance_score += 1
+            # Try semantic search first (more intelligent)
+            try:
+                # Use the already imported semantic_search_tfidf
+                semantic_search = semantic_search_tfidf
             
-            # Quality score
-            age_days = (datetime.utcnow() - entry.created_at.replace(tzinfo=None)).days if entry.created_at else 0
-            quality_score = calculate_quality_score(
-                success_rate=entry.success_rate or 0.0,
-                usage_count=entry.usage_count or 0,
-                upvotes=entry.upvotes or 0,
-                downvotes=entry.downvotes or 0,
-                verified=entry.verified or False,
-                age_days=age_days,
-                recent_usage=0  # Could track this separately
+            # Convert entries to dict format for semantic search
+            entry_dicts = []
+            for entry in entries:
+                entry_dicts.append({
+                    'id': entry.id,
+                    'title': entry.title or '',
+                    'description': entry.description or '',
+                    'content': entry.content or '',
+                    'tags': entry.tags or [],
+                    'entry': entry  # Keep reference to original
+                })
+            
+            # Perform semantic search
+            semantic_results = semantic_search(
+                query=query.search_query,
+                documents=entry_dicts,
+                top_k=query.limit * 2  # Get more, then filter by quality
             )
             
-            # Combined score (relevance + quality)
-            total_score = relevance_score + (quality_score * 20)  # Quality weighted heavily
-            scored_entries.append((total_score, entry))
-        
-        # Sort by score
-        scored_entries.sort(key=lambda x: x[0], reverse=True)
-        entries = [entry for _, entry in scored_entries[:query.limit]]
+            # Combine semantic similarity with quality scores
+            scored_entries = []
+            for result in semantic_results:
+                entry = result['entry']
+                similarity = result.get('similarity', 0.0)
+                
+                # Quality score
+                age_days = (datetime.utcnow() - entry.created_at.replace(tzinfo=None)).days if entry.created_at else 0
+                quality_score = calculate_quality_score(
+                    success_rate=entry.success_rate or 0.0,
+                    usage_count=entry.usage_count or 0,
+                    upvotes=entry.upvotes or 0,
+                    downvotes=entry.downvotes or 0,
+                    verified=entry.verified or False,
+                    age_days=age_days,
+                    recent_usage=0
+                )
+                
+                # Combined score: semantic similarity (70%) + quality (30%)
+                total_score = (similarity * 0.7) + (quality_score * 0.3)
+                scored_entries.append((total_score, entry, similarity))
+            
+            # Sort by combined score
+            scored_entries.sort(key=lambda x: x[0], reverse=True)
+            entries = [entry for _, entry, _ in scored_entries[:query.limit]]
+            
+        except Exception as e:
+            # Fallback to keyword search if semantic search fails
+            print(f"Semantic search failed: {e}, using keyword search")
+            search = f"%{query.search_query}%"
+            entries = db_query.filter(
+                or_(
+                    KnowledgeEntry.title.ilike(search),
+                    KnowledgeEntry.description.ilike(search),
+                    KnowledgeEntry.content.ilike(search)
+                )
+            ).all()
+            
+            # Score entries by relevance + quality
+            scored_entries = []
+            for entry in entries:
+                # Relevance score
+                relevance_score = 0
+                if entry.title and query.search_query.lower() in entry.title.lower():
+                    relevance_score += 10
+                if entry.description and query.search_query.lower() in entry.description.lower():
+                    relevance_score += 5
+                if entry.content and query.search_query.lower() in entry.content.lower():
+                    relevance_score += 1
+                
+                # Quality score
+                age_days = (datetime.utcnow() - entry.created_at.replace(tzinfo=None)).days if entry.created_at else 0
+                quality_score = calculate_quality_score(
+                    success_rate=entry.success_rate or 0.0,
+                    usage_count=entry.usage_count or 0,
+                    upvotes=entry.upvotes or 0,
+                    downvotes=entry.downvotes or 0,
+                    verified=entry.verified or False,
+                    age_days=age_days,
+                    recent_usage=0
+                )
+                
+                # Combined score (relevance + quality)
+                total_score = relevance_score + (quality_score * 20)
+                scored_entries.append((total_score, entry))
+            
+            # Sort by score
+            scored_entries.sort(key=lambda x: x[0], reverse=True)
+            entries = [entry for _, entry in scored_entries[:query.limit]]
     
     # Order by quality score and limit
     def get_quality_score(entry):
