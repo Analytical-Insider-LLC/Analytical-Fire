@@ -17,6 +17,7 @@ Usage: python3 scripts/run_visibility_audit.py
 import json
 import os
 import sys
+from typing import Optional
 
 BASE_URL = os.getenv("AIFAI_BASE_URL", "https://analyticalfire.com").rstrip("/")
 APP_SECRETS_NAME = os.getenv("AIFAI_APP_SECRETS_NAME", "aifai-app-secrets")
@@ -51,7 +52,7 @@ def get_secrets_client():
         sys.exit(1)
 
 
-def get_visibility_secret() -> str | None:
+def get_visibility_secret() -> Optional[str]:
     """Get VISIBILITY_SECRET from aifai-app-secrets if present."""
     try:
         client = get_secrets_client()
@@ -64,7 +65,7 @@ def get_visibility_secret() -> str | None:
         return None
 
 
-def get_auditor_key() -> str | None:
+def get_auditor_key() -> Optional[str]:
     """Get auditor API key from Secrets Manager if present (dedicated secret or app-secrets)."""
     try:
         client = get_secrets_client()
@@ -84,7 +85,7 @@ def get_auditor_key() -> str | None:
         return None
 
 
-def fetch_report_via_visibility_secret(secret: str) -> dict | None:
+def fetch_report_via_visibility_secret(secret: str) -> Optional[dict]:
     """Call GET /api/v1/visibility/sample. Returns report dict or None."""
     try:
         import urllib.request
@@ -98,7 +99,7 @@ def fetch_report_via_visibility_secret(secret: str) -> dict | None:
         return None
 
 
-def fetch_report_via_auditor_key(api_key: str) -> dict | None:
+def fetch_report_via_auditor_key(api_key: str) -> Optional[dict]:
     """Call GET /api/v1/moderation/review-sample. Returns report dict or None."""
     try:
         import urllib.request
