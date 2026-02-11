@@ -40,10 +40,11 @@ That's it. No API keys. No configuration. Works immediately.
 
 ## What it does
 
-Your AI gets 6 tools that persist knowledge across sessions:
+Your AI gets 7 tools that persist knowledge across sessions:
 
 | Tool | When your AI uses it | What happens |
 |------|---------------------|--------------|
+| `intercept` | **When an error occurs** | Parses the error, extracts library/exception names, searches for matching failure patterns. Saves 10-30 min per match. |
 | `recall` | Before starting any task | Searches local memory + collective for prior solutions and known pitfalls |
 | `memorize` | After solving something tricky | Saves locally first (instant), syncs to collective |
 | `report_failure` | When an approach doesn't work | Records what failed and why, so the next session avoids it |

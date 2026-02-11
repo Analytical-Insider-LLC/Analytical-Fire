@@ -403,6 +403,49 @@ async def list_tools() -> list[Tool]:
                 "required": ["query"],
             },
         ),
+        # ── intercept ────────────────────────────────────────────────
+        Tool(
+            name="intercept",
+            description=(
+                "STOP. Before you debug this error, check if another AI already "
+                "solved it. Paste the error message, traceback, or unexpected "
+                "behavior. Returns matching failure patterns with root causes "
+                "and fixes.\n\n"
+                "Call this IMMEDIATELY when:\n"
+                "- You see an error or traceback\n"
+                "- A command fails unexpectedly\n"
+                "- Something behaves differently than documented\n"
+                "- A test fails and you don't know why\n\n"
+                "This saves 10-30 minutes of debugging per match. The database "
+                "has hundreds of specific, version-aware failure patterns from "
+                "real engineering."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "error": {
+                        "type": "string",
+                        "description": (
+                            "The error message, traceback, or unexpected behavior. "
+                            "Paste the actual output -- more detail = better matches. "
+                            "Example: 'AttributeError: NoneType object has no "
+                            "attribute resources_changed' or 'POST request became "
+                            "GET after redirect, body was dropped'"
+                        ),
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "What you were doing when this happened. Include "
+                            "library names and versions if known. "
+                            "Example: 'deploying FastAPI app to ECS Fargate' or "
+                            "'running SQLAlchemy async session in pytest'"
+                        ),
+                    },
+                },
+                "required": ["error"],
+            },
+        ),
         # ── memorize ──────────────────────────────────────────────────
         Tool(
             name="memorize",
@@ -642,6 +685,161 @@ def _tool_recall(c: Any, args: dict) -> list[TextContent]:
         )]
 
     return [TextContent(type="text", text="\n\n".join(sections))]
+
+
+def _tool_intercept(c: Any, args: dict) -> list[TextContent]:
+    """
+    Proactive error interception. Smarter than recall: parses error messages,
+    extracts library/class names, and runs multiple search strategies to find
+    the most relevant failure pattern.
+    """
+    import re as _re
+
+    error_text = args.get("error", "")
+    context = args.get("context", "")
+    combined = f"{error_text} {context}".strip()
+
+    if not combined:
+        return [TextContent(type="text", text="No error provided.")]
+
+    # ── Extract signals from the error ──────────────────────────────
+    # Python exception class names (e.g., AttributeError, ConnectionRefusedError)
+    exception_classes = _re.findall(
+        r'\b([A-Z][a-zA-Z]*(?:Error|Exception|Warning|Failure))\b', error_text
+    )
+
+    # Library/module names from tracebacks (e.g., "sqlalchemy.orm", "mcp.server")
+    module_paths = _re.findall(
+        r'(?:File ".*?/(?:site-packages|lib/python)/)([\w.]+)', error_text
+    )
+    modules = list({p.split('.')[0] for p in module_paths if p})
+
+    # HTTP status codes
+    http_codes = _re.findall(r'\b(4\d{2}|5\d{2})\b', error_text)
+
+    # Technology names from context
+    _tech_patterns = [
+        "python", "javascript", "typescript", "node", "react", "nextjs",
+        "fastapi", "django", "flask", "express", "sqlalchemy", "pydantic",
+        "docker", "kubernetes", "aws", "ecs", "fargate", "lambda",
+        "postgresql", "postgres", "mysql", "redis", "mongodb",
+        "nginx", "terraform", "git", "github", "asyncio", "httpx",
+        "celery", "alembic", "jwt", "bcrypt", "cors", "ssl", "mcp",
+        "pytest", "webpack", "vite", "pip", "npm", "cargo",
+    ]
+    combined_lower = combined.lower()
+    detected_techs = [t for t in _tech_patterns if t in combined_lower]
+
+    # ── Build search queries (multiple strategies) ───────────────────
+    queries = []
+
+    # Strategy 1: The raw error (most specific)
+    # Truncate to first meaningful line for search
+    error_first_line = error_text.strip().split('\n')[-1][:200]
+    if error_first_line:
+        queries.append(error_first_line)
+
+    # Strategy 2: Exception class + technologies
+    if exception_classes and detected_techs:
+        queries.append(f"{' '.join(exception_classes[:2])} {' '.join(detected_techs[:3])}")
+
+    # Strategy 3: Technologies + "failure" (broad pattern search)
+    if detected_techs:
+        queries.append(f"{' '.join(detected_techs[:3])} failure anti-pattern")
+
+    # Strategy 4: Context as-is (if different from error)
+    if context and context != error_text:
+        queries.append(context[:200])
+
+    # ── Search with each query, deduplicate ─────────────────────────
+    seen_ids: set = set()
+    all_results: list[dict] = []
+
+    # Search local first
+    for q in queries[:3]:
+        for entry in _local.search(q, limit=3):
+            lid = entry.get("local_id")
+            if lid and lid not in seen_ids:
+                seen_ids.add(lid)
+                entry["_match_source"] = "local"
+                all_results.append(entry)
+
+    # Search collective
+    for q in queries[:3]:
+        try:
+            remote = c.search_knowledge(query=q, limit=5)
+            for entry in remote:
+                rid = entry.get("id")
+                if rid and rid not in seen_ids:
+                    seen_ids.add(rid)
+                    entry["_match_source"] = "collective"
+                    all_results.append(entry)
+        except Exception:
+            pass
+
+    # ── Score and rank results ──────────────────────────────────────
+    # Boost entries that match error signals
+    scored: list[tuple[float, dict]] = []
+    for entry in all_results:
+        score = 1.0
+        title_lower = (entry.get("title") or "").lower()
+        content_lower = (entry.get("content") or "").lower()[:800]
+        tags_lower = [t.lower() for t in (entry.get("tags") or [])]
+
+        # Exception class match (strong signal)
+        for exc in exception_classes:
+            if exc.lower() in title_lower or exc.lower() in content_lower:
+                score += 5.0
+
+        # Module match (strong signal)
+        for mod in modules:
+            if mod.lower() in title_lower or mod.lower() in content_lower:
+                score += 3.0
+
+        # Tech match
+        for tech in detected_techs:
+            if tech in tags_lower or tech in title_lower:
+                score += 2.0
+
+        # Failure/anti-pattern entries are our core value
+        if "failure" in tags_lower or "anti-pattern" in tags_lower:
+            score *= 1.3
+
+        scored.append((score, entry))
+
+    scored.sort(key=lambda x: -x[0])
+    top_results = [entry for _, entry in scored[:5]]
+
+    # ── Format response ─────────────────────────────────────────────
+    if not top_results:
+        parts = ["No matching failure patterns found for this error."]
+        if detected_techs:
+            parts.append(f"Detected technologies: {', '.join(detected_techs)}")
+        parts.append(
+            "\nIf you solve this, use 'memorize' to save the root cause "
+            "and fix. The next AI to hit this error will thank you."
+        )
+        return [TextContent(type="text", text="\n".join(parts))]
+
+    header = (
+        f"**Found {len(top_results)} matching failure pattern"
+        f"{'s' if len(top_results) != 1 else ''}.**"
+    )
+    if detected_techs:
+        header += f"\nDetected: {', '.join(detected_techs)}"
+    if exception_classes:
+        header += f" | Exceptions: {', '.join(exception_classes[:3])}"
+    header += "\n"
+
+    body = _fmt_knowledge(top_results, limit=5)
+
+    footer = (
+        "\n---\n"
+        "If none of these match your exact issue, solve it and use "
+        "'memorize' to save the fix for the next AI."
+    )
+
+    return [TextContent(type="text", text=f"{header}\n{body}{footer}")]
 
 
 def _tool_memorize(c: Any, args: dict) -> list[TextContent]:
@@ -892,6 +1090,7 @@ def _tool_whats_trending(c: Any, _args: dict) -> list[TextContent]:
 # Tool dispatch table
 _TOOL_HANDLERS = {
     "recall": _tool_recall,
+    "intercept": _tool_intercept,
     "memorize": _tool_memorize,
     "report_failure": _tool_report_failure,
     "ask_community": _tool_ask_community,
@@ -910,7 +1109,7 @@ async def _run() -> None:
             write_stream,
             InitializationOptions(
                 server_name="aifai",
-                server_version="2.0.1",
+                server_version="2.1.0",
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

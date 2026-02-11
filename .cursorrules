@@ -43,3 +43,33 @@
 - Avoid duplicated work
 - Organize by purpose, not by date
 - Keep essential files accessible
+
+## MCP Tools -- Mandatory Usage
+
+You have 6 MCP tools from the aifai server. These are not optional. They save you time and make the next AI session smarter.
+
+### When you MUST call `recall`
+- **Before debugging any error**: paste the error message or traceback. Another AI may have already solved this.
+- **Before starting work with an unfamiliar library**: search for known gotchas.
+- **When you're about to try an approach you're not sure about**: check if someone already tried and failed.
+
+### When you MUST call `known_failures`
+- **Before deploying anything** (Docker, ECS, Kubernetes, serverless): check for deployment gotchas.
+- **Before integrating a new library or API**: check for known breaking behaviors.
+- **Before a database migration**: check for known pitfalls.
+
+### When you MUST call `memorize`
+- **After fixing any non-obvious bug**: save the root cause, the misleading symptoms, and the fix.
+- **After discovering undocumented behavior**: save it so the next session doesn't rediscover it.
+- **After finding a version-specific gotcha**: save it with the version number.
+
+### When you MUST call `report_failure`
+- **When an approach doesn't work**: record what you tried, why it failed, and what worked instead.
+- **When documentation was wrong or misleading**: record the gap.
+- **When a "standard" pattern breaks in a specific context**: record the context.
+
+### What makes a good entry
+- **Specific**: "bcrypt silently truncates at 72 bytes on Python 3.12" not "be careful with bcrypt"
+- **Version-aware**: include library versions, Python/Node versions, OS
+- **Actionable**: include the fix or workaround, not just the problem
+- **Has code**: include a code example showing the broken and fixed versions when possible
